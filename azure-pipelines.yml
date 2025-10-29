@@ -1,0 +1,60 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  name: 'SandboxAgent'
+
+stages:
+- stage: SecurityScan
+  displayName: "Dependency & Code Scanning"
+  jobs:
+  - job: Scan
+    displayName: "Run Security Scans"
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '22.x'
+      displayName: "Use Node.js"
+
+    - script: |
+        npm install
+        echo "✅ Installed dependencies"
+      displayName: "Install Dependencies"
+
+    # Dependency Scan and Fail on High/Critical
+    - script: |
+        echo "🔍 Running dependency scan..."
+        npm audit --json > audit-report.json || true
+        
+        echo "🧠 Analyzing vulnerabilities..."
+        CRITICAL=$(cat audit-report.json | jq '.metadata.vulnerabilities.critical')
+        HIGH=$(cat audit-report.json | jq '.metadata.vulnerabilities.high')
+        
+        echo "Found vulnerabilities:"
+        echo "Critical: $CRITICAL"
+        echo "High: $HIGH"
+        
+        if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+          echo "❌ High or Critical vulnerabilities detected!"
+          exit 1
+        else
+          echo "✅ No high or critical vulnerabilities found."
+        fi
+      displayName: "Run Dependency Scan (npm audit + fail on high severity)"
+      failOnStderr: false
+
+    # Code Scan (using ESLint)
+    - script: |
+        npm install eslint --save-dev
+        npx eslint . --ext .js || true
+        echo "✅ Code linting complete."
+      displayName: "Run Code Scan (ESLint)"
+
+    # Optional: Publish the results as build artifacts
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: 'audit-report.json'
+        artifactName: 'security-scan-results'
+      displayName: "Publish Scan Results"
